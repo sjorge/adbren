@@ -1,4 +1,4 @@
-#!/usr/bin/perl -w
+#!/usr/bin/env perl
 # Copyright (c) 2008, clip9 <clip9str@gmail.com>
 
 # Permission to use, copy, modify, and/or distribute this software for any
@@ -25,6 +25,7 @@ use File::Pid;
 use Getopt::Long;
 use Storable qw(nstore retrieve);
 use Data::Dumper;
+use Digest::CRC;
 use Carp;
 
 ### DEFAULTS ###
@@ -33,7 +34,7 @@ my $format_presets = [
 "\%anime_name_english\%_\%episode\%\%version\%-\%group_short\%.\%filetype\%",
 "\%anime_name_english\%_\%episode\%\%version\%_\%episode_name\%-\%group_short\%.\%filetype\%",
 "\%anime_name_english\%_\%episode\%\%version\%_\%episode_name\%-\%group_short\%(\%crc32\%).\%filetype\%",
-"\%anime_name_english\% - \%episode\% - \%episode_name\% - [\%group_short\%](\%crc32\%).\%filetype\%",
+"\%anime_name_romaji\% - \%episode\% - \%episode_name\% (\%crc32\%).\%filetype\%",
 "[\%group_short\%] \%anime_name_english\% - \%episode\% - \%episode_name\% (\%crc32\%).\%filetype\%",
 ];
 
@@ -46,7 +47,7 @@ my $nocorrupt     = 0;
 my $nolog         = 0;
 my $noskip        = 0;
 my $onlyhash      = 0;
-my $format_preset = 0;
+my $format_preset = 3;
 my $ping          = 0;
 my $state         = -1;
 my $viewed        = -1;
@@ -126,6 +127,7 @@ if ( $viewed !~ m/[0-1]/ ) {
     }
 }
 
+
 my @files;
 while ( ( my $file = shift ) ) {
     if ( -d $file ) {
@@ -160,10 +162,10 @@ if ($onlyhash) {
 
 $SIG{'INT'} = 'CLEANUP';
 
-my $pidfile = File::Pid->new;
-my $pid = $pidfile->running;
-die "Client already running: $pid\n" if $pid;
-$pidfile->write;
+#my $pidfile = File::Pid->new;
+#my $pid = $pidfile->running;
+#die "Client already running: $pid\n" if $pid;
+#$pidfile->write;
 
 sub CLEANUP {
     exit(1);
@@ -177,6 +179,19 @@ foreach my $filepath (@files) {
         print "$filepath Not found\n";
         next;
     }
+    if ( -l $filepath ) {
+        print "$filepath is a link, ignoring\n";
+        next;
+    }
+    if ($filepath =~ m/\.nfo$/) {
+        print "$filepath is nfo, ignoring\n";
+        next;
+    }
+    if ($filepath =~ m/\.jpg$/) {
+        print "$filepath is jpg, ignoring\n";
+        next;
+    }
+
     my $retry;
     my ( $volume, $directory, $filename ) = File::Spec->splitpath($filepath);
     print "File: $volume $directory, $filename" if $debug;
@@ -224,18 +239,30 @@ foreach my $filepath (@files) {
     if ( $fileinfo->{'anime_name_romaji'} eq "" ) {
         $fileinfo->{'anime_name_romaji'} = $fileinfo->{'anime_name_english'};
     }
+    # Manually calculate crc if anidb doesn't return one
+    if ( $fileinfo->{'crc32'} eq "" ) {
+        print "Calculating manual crc32 for $filename\n";
+	my $hash = calculate_crc($filepath);
+        $fileinfo->{'crc32'} = $hash;
+        print "Calculated $hash\n";
+    }
     $newname =~ s/\%orginal_name\%/$filename/xmsig;
     while ( $newname =~ /\%([^\%]+)\%/ ) {
         my $key = $1;
         if ( defined $fileinfo->{$key} ) {
+	    my ($title, $year) = ($fileinfo->{$key} =~ m/(.+)_(\d{4})_/);
+	    if ($year) {
+	      $fileinfo->{$key} = $title . "(" . $year . ")";
+	    }
             $fileinfo->{$key} = substr $fileinfo->{$key}, 0, 180;
             if ( !$noclean ) {
                 $fileinfo->{$key} =~ s/[?:%\/]//g;
+                $fileinfo->{$key} =~ s/[`]/'/g;
                 if ($strict) {
                     $fileinfo->{$key} =~ s/[^a-zA-Z0-9-]/_/g;
                 }
                 else {
-                    $fileinfo->{$key} =~ s/[^a-zA-Z0-9-&!`',.~+\- ]/_/g;
+                    $fileinfo->{$key} =~ s/[^a-zA-Z0-9-&!`',.~+\- \(\)]/_/g;
                 }
                 $fileinfo->{$key} =~ s/[_]+/_/g;
             }
@@ -289,6 +316,17 @@ foreach my $filepath (@files) {
     if ($mylist) {
         $a->mylistadd( $fileinfo, $state, $viewed, $storage );
     }
+}
+
+sub calculate_crc {
+    my $filepath = shift(@_);
+    my $crc = Digest::CRC->new(type=>"crc32");
+    open(my $handle, $filepath);
+    $crc->addfile(*$handle);
+    close($handle);
+    my $hash = $crc->hexdigest;
+    $hash =~ tr/a-z/A-Z/;
+    return $hash
 }
 
 sub print_help {
@@ -580,6 +618,7 @@ sub file {
         $fileinfo{anime_synonyms}   =~ s/'/,/g;
         $fileinfo{lang_sub}         =~ s/'/,/g;
         $fileinfo{lang_dub}         =~ s/'/,/g;
+	$fileinfo{crc32}            =~ tr/a-z/A-Z/;
         $fileinfo{censored} = "cen"
           if ( $fileinfo{status_code} & STATUS_CEN );
         $fileinfo{censored} = "unc"
@@ -803,9 +842,14 @@ sub _sendrecv {
     debug "<--", $recvmsg;
     if ( $recvmsg =~ m/(adbr-[\d]+)/xmsi ) {
         if ( $tag ne $1 ) {
-            carp
-              "This is not the tag we are waiting for. Retrying ($tag!= $1)\n";
-            return $self->_sendrecv( $command, $parameter_ref, $delay );
+            # Die if we don't get the expected response
+            # Otherwise we'll continute to retry and usually end up banned
+            # from the API
+            croak
+              "This is not the tag we are waiting for. Dying ($tag!= $1)\n";
+	    #carp
+	    #  "This is not the tag we are waiting for. Retrying ($tag!= $1)\n";
+	    #return $self->_sendrecv( $command, $parameter_ref, $delay );
         }
         $recvmsg =~ s/adbr-[\d]+\ //xmsi;
     }
@@ -894,9 +938,9 @@ sub ed2k_hash {
 }
 
 END {
-    if ( defined $pidfile and defined $pidfile->running and $pidfile->running eq $$ ) {
-        $pidfile->remove or warn "Could not unlink pid file\n";
-    }
+    #if ( defined $pidfile and defined $pidfile->running and $pidfile->running eq $$ ) {
+    #    $pidfile->remove or warn "Could not unlink pid file\n";
+    #}
     if ( defined $a ) {
         $a->logout();
     }
