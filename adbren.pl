@@ -40,6 +40,7 @@ my $format_presets = [
 
 my $mylist        = 0;
 my $norename      = 0;
+my $symlink       = 0;
 my $noclean       = 0;
 my $strict        = 0;
 my $debug         = 0;
@@ -76,6 +77,7 @@ my $config = retrieve($config_file)
 my $result = GetOptions(
     "mylist"    => \$mylist,
     "norename"  => \$norename,
+    "symlink"   => \$symlink,
     "noclean"   => \$noclean,
     "debug"     => \$debug,
     "format=s"  => \$format,
@@ -180,15 +182,15 @@ foreach my $filepath (@files) {
         next;
     }
     if ( -l $filepath ) {
-        print "$filepath is a link, ignoring\n";
+        print "$filepath is a link, ignoring\n" if $debug;
         next;
     }
     if ($filepath =~ m/\.nfo$/) {
-        print "$filepath is nfo, ignoring\n";
+        print "$filepath is nfo, ignoring\n" if $debug;
         next;
     }
     if ($filepath =~ m/\.jpg$/) {
-        print "$filepath is jpg, ignoring\n";
+        print "$filepath is jpg, ignoring\n" if $debug;
         next;
     }
 
@@ -311,6 +313,14 @@ foreach my $filepath (@files) {
                 print $log "$newname\n";
                 close $log;
             }
+
+            if ( $symlink ) {
+                if ( -e $newpath and not -e $filepath ) {
+                    print $newpath. ": Linked to " . $filepath . "\n";
+                    symlink( $newpath, $filepath )
+                      or print( $filename. ": Symlink: " . $! . "\n" );
+                }
+            }
         }
     }
     if ($mylist) {
@@ -340,6 +350,7 @@ Options:
 	--noclean	Do not clean values from API for format vars. 
            		(Don't remove special characters)
 	--norename	Do not rename files. Just print the new names.
+	--symlink       Create symlink from old filepath -> new filepath.
 	--mylist	Add hashed files to mylist.
 	--state		Set anime state; can be: hdd, cd or deleted.
 	--viewed	Set anime to viewed; can be: true or false.
