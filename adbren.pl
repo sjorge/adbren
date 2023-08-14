@@ -41,6 +41,7 @@ my $format_presets = [
 my $mylist        = 0;
 my $norename      = 0;
 my $symlink       = 0;
+my $force         = 0;
 my $noclean       = 0;
 my $strict        = 0;
 my $debug         = 0;
@@ -78,6 +79,7 @@ my $result = GetOptions(
     "mylist"    => \$mylist,
     "norename"  => \$norename,
     "symlink"   => \$symlink,
+    "force"     => \$force,
     "noclean"   => \$noclean,
     "debug"     => \$debug,
     "format=s"  => \$format,
@@ -293,7 +295,7 @@ foreach my $filepath (@files) {
     }
     else {
 
-        if ( -e $newpath ) {
+        if ( -e $newpath and !$force ) {
             print $filename. ": " . $newpath
               . " Already exists. Refusing to overwrite\n";
         }
