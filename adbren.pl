@@ -195,6 +195,10 @@ foreach my $filepath (@files) {
         print "$filepath is jpg, ignoring\n" if $debug;
         next;
     }
+    if ($filepath =~ m/\.png$/) {
+        print "$filepath is png, ignoring\n" if $debug;
+        next;
+    }
     if ($filepath =~ m/\.plexmatch$/) {
         print "$filepath is .plexmatch, ignoring\n" if $debug;
         next;
