@@ -293,7 +293,12 @@ foreach my $filepath (@files) {
     my ( $fvol, $fdir, $ffile ) = File::Spec->splitpath($newname);
 
     if ( $fdir ne "" ) {
-        $newpath = $newname;
+        # Remove trailing "." from newdir, causes issues with cifs clients
+        if ($fdir =~ m/\.\/$/) {
+                $fdir =~ s/\.\//\//;
+                $newname = File::Spec->catpath( $fvol, $fdir, $ffile );
+        }
+       $newpath = $newname;
     }
     else {
         $newpath = File::Spec->catpath( $volume, $directory, $newname );
