@@ -277,6 +277,7 @@ foreach my $filepath (@files) {
                     $fileinfo->{$key} =~ s/[^a-zA-Z0-9-&!`',.~+\- \(\)]/_/g;
                 }
                 $fileinfo->{$key} =~ s/[_]+/_/g;
+		$fileinfo->{$key} =~ s/^_//g;
             }
             $newname =~ s/\%$key\%/$fileinfo->{$key}/;
         }
